@@ -2,6 +2,22 @@
 
 格式遵循 Keep a Changelog，并采用语义化版本。
 
+## [2.2.6] - 2026-10-29
+
+修复中文 Windows 上部分取数结果乱码。沿用现有界面。
+
+### 修复
+
+- **legacy 取数在中文 Windows 上输出乱码**（提交 `fbba79d`，与 vibe-astock #25 同一根因）：公告（`fetch_announcements`）、行情、K 线、财务等 8 个 legacy 取数脚本经 `common.finish()` 输出 JSON 时，没有像 `fetch_endpoint.py` 那样把输出固定为 UTF-8。中文 Windows 的管道默认用 GBK 写出，研究服务按 UTF-8 读，公告标题等中文就成了乱码。现在 `finish()` 输出前固定 UTF-8，取数子进程环境也固定 `PYTHONIOENCODING=utf-8`、`PYTHONUTF8=1`（调用方显式给的仍可覆盖）。
+
+### 测试
+
+- 本机验证（2026-10-29，macOS）：后端全套 1295 项：1287 通过、8 跳过（Windows 实机专项）、0 失败；desktop 351/351，构建通过；前后端类型检查通过；Python（计算库 311、回测 583、数据脚本 582）1476/1476，mypy 检查 106 个文件通过。
+- 新增 3 条回归用例：GBK 管道下 legacy 输出仍是合法 UTF-8（含不间断空格的标题）；取数环境的编码变量不受外部 GBK 设置影响、显式覆盖仍生效。修复前 3 条都失败，修复后通过。
+- 用 `PYTHONIOENCODING=gbk` 模拟中文 Windows 管道：修复前按 UTF-8 解码报错（输出是 GBK 字节），修复后得到「襄阳轴承：2026年三季度报告」。
+- GPT-6.1 Sol 独立审查一轮：无 P1 / P2 / P3。
+- 没验证：Windows 实机；外部取数端点与完整研究业务未重跑。
+
 ## [2.2.5] - 2026-10-29
 
 说清 WorkBuddy 新版借不到登录的情况，不再误报「已登录」。沿用现有界面。
