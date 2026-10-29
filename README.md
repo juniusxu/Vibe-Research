@@ -261,7 +261,7 @@ A 股最多查 30 只，持有的优先。某个来源没取到会列在「没�
 |---|---|
 | Claude Code 订阅 | 本机安装 Claude Code，并用 claude.ai 订阅登录 |
 | Codex 订阅 | 本机安装 OpenAI 官方 Codex CLI（0.160.0 及以上），并用 ChatGPT 账号 `codex login` 登录 |
-| WorkBuddy / CodeBuddy | 本机已安装并登录的 WorkBuddy 桌面版（自带 CodeBuddy Code），或腾讯官方 CLI `@tencent-ai/codebuddy-code` |
+| WorkBuddy / CodeBuddy | 腾讯官方 CLI `@tencent-ai/codebuddy-code`，在终端运行 `codebuddy` 登录；能借出登录的旧版 WorkBuddy 桌面版（自带 CodeBuddy Code）也会直接识别 |
 | 模型 API | 任意兼容 Chat Completions 的服务：DeepSeek、通义千问、智谱 GLM、Kimi、MiMo、OpenAI 等，填 API 地址、模型名和 key |
 
 - 第一次打开首页会弹出「请接入AI」：已登录的订阅点一下就能测试并保存；「其他接入方式」进入设置页填 API。也可以先关掉弹窗浏览栏目。
@@ -275,7 +275,7 @@ A 股最多查 30 只，持有的优先。某个来源没取到会列在「没�
 
 - **Codex**：`npm install -g @openai/codex`，在终端运行 `codex login`，用 ChatGPT 账号登录；回到「接入 AI」点「重新检测」，显示可用后点「测试并保存」。用 API key 登录的 Codex 不可用，避免订阅悄悄变成按量计费。
 - **Claude Code**：用 claude.ai 订阅登录后，设置页会自动检测；API key、Bedrock、Vertex 登录不算订阅。
-- **WorkBuddy / CodeBuddy**：装好并登录 WorkBuddy 桌面版就能直接识别，不用重复安装或登录；Windows 上装在别的盘或自定义文件夹，也会从「已安装的程序」登记或正在运行的 WorkBuddy 里找到。没有桌面版时，运行 `npm install -g @tencent-ai/codebuddy-code`，再运行 `codebuddy` 登录。仍找不到时（卡片显示「未安装」），先打开 WorkBuddy 再点「重新检测」，或在 WorkBuddy 卡片里填它的安装文件夹，或在启动前设环境变量 `CODEBUDDY_BIN`。
+- **WorkBuddy / CodeBuddy**：运行 `npm install -g @tencent-ai/codebuddy-code` 安装腾讯官方独立命令行，再在终端运行 `codebuddy` 登录一次（跟 WorkBuddy 桌面版的登录分开），回到「接入 AI」点「重新检测」。新版 WorkBuddy 桌面版把登录加密保存、只给它自己启动的程序用，本产品借不到，卡片会显示「借不到 WorkBuddy 的登录」（之前在卡片里指定过 WorkBuddy 位置的，装好独立命令行后先点「恢复自动检测」；设了 `CODEBUDDY_BIN` 的，改掉或去掉再重启）；能借到登录的旧版桌面版仍会直接识别，Windows 上装在别的盘或自定义文件夹，也会从「已安装的程序」登记或正在运行的 WorkBuddy 里找到。仍找不到时（卡片显示「未安装」），先打开 WorkBuddy 再点「重新检测」，或在 WorkBuddy 卡片里填它的安装文件夹，或在启动前设环境变量 `CODEBUDDY_BIN`。
 - **模型 API**：「接入 AI」→「API 接入」，选供应商，填 API 地址、模型名和 key，点「测试并保存」。
 
 本机状态不明确时，运行 `scripts/doctor`（Windows 为 `scripts\doctor.ps1`）查看修复提示。
