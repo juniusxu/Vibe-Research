@@ -9,6 +9,7 @@ import { API_MODELS, PROVIDER_BASE, SUBSCRIPTION_MODELS, apiPresetForSaved, isCl
 import { clearLlm, loadUserLlm, saveLlm } from "@/lib/llm";
 import { LLM_KEY } from "@/lib/llmStore";
 import { testAndSaveAi } from "@/lib/aiConnection";
+import { EMPTY_MODEL_LIST, ModelListSession, type ModelListState } from "@/lib/modelList";
 import { useAiRuntime } from "@/hooks/useAiRuntime";
 import { UpdateSettingsCard } from "@/components/UpdateSettingsCard";
 import { SecContactCard } from "@/components/SecContactCard";
@@ -190,12 +191,12 @@ export function Settings() {
   const [msg, setMsg] = useState("");
   const [msgErr, setMsgErr] = useState("");
   const [errDetail, setErrDetail] = useState("");
-  const [fetchedModels, setFetchedModels] = useState<{ id: string; name: string }[] | null>(null);
-  const [fetchingModels, setFetchingModels] = useState(false);
-  const [modelsMsg, setModelsMsg] = useState("");
-  const [modelsErr, setModelsErr] = useState("");
-  const [modelsErrDetail, setModelsErrDetail] = useState("");
-  const modelsAbort = useRef<AbortController | null>(null);
+  // 获取模型列表的状态由 ModelListSession 管:清除配置 / 换地址时作废在途请求,旧结果回来也不再显示
+  const [modelList, setModelList] = useState<ModelListState>(EMPTY_MODEL_LIST);
+  const modelsSession = useRef<ModelListSession | null>(null);
+  modelsSession.current ??= new ModelListSession(setModelList);
+  useEffect(() => () => modelsSession.current?.reset(), []);
+  const { loading: fetchingModels, models: fetchedModels, msg: modelsMsg, err: modelsErr, detail: modelsErrDetail } = modelList;
   const [testing, setTesting] = useState(false);
   const [rechecking, setRechecking] = useState(false);
   const refreshTail = useRef<Promise<void>>(Promise.resolve());
@@ -254,11 +255,8 @@ export function Settings() {
     setMsg(""); setMsgErr(""); setErrDetail(""); resetModels();
   };
 
-  /** 换了来源 / 地址 / key,上一份模型列表就不算数了 */
-  const resetModels = () => {
-    modelsAbort.current?.abort(); modelsAbort.current = null;
-    setFetchedModels(null); setModelsMsg(""); setModelsErr(""); setModelsErrDetail(""); setFetchingModels(false);
-  };
+  /** 换了来源 / 地址 / key、或清除了配置:取消在途请求,清空上一份模型列表与提示 */
+  const resetModels = () => modelsSession.current?.reset();
 
   const say = (ok: string) => { setMsg(ok); setMsgErr(""); setErrDetail(""); };
   const oops = (bad: string, detail = "") => { setMsg(""); setMsgErr(bad); setErrDetail(detail); };
@@ -274,34 +272,20 @@ export function Settings() {
 
   /** 「获取可用模型」:按当前填的来源 / 地址 / key 问端点有哪些模型;只读,不保存任何配置 */
   const fetchModelList = async () => {
+    const session = modelsSession.current!;
     const pv = providerOfModel(apiId);
-    const fail = (t: string, d = "") => { setModelsMsg(""); setModelsErr(t); setModelsErrDetail(d); };
-    if (!apiKey.trim()) return fail("先填 API Key，才能向服务商获取模型列表");
-    if (!baseURL.trim() && pv === "openai-compatible") return fail("自填端点必须先给出 Base URL");
-    if (/[{<][A-Za-z_]/.test(baseURL)) return fail("Base URL 里还有占位符没替换（把 {…} 换成你自己的值）");
-    modelsAbort.current?.abort();
-    const ac = new AbortController();
-    modelsAbort.current = ac;
-    setFetchingModels(true); setModelsMsg(""); setModelsErr(""); setModelsErrDetail("");
-    try {
-      const r = await backend.llmModels({ provider: pv, baseURL: baseURL.trim(), apiKey: apiKey.trim() }, ac.signal);
-      if (ac.signal.aborted) return;
-      if (r.models.length === 0) {
-        setFetchedModels(null);
-        return fail("端点返回了空的模型列表，请手动填写模型名", `GET ${r.url} 成功，但没有解析出任何模型。`);
-      }
-      setFetchedModels(r.models);
-      setModelsMsg(`取到 ${r.models.length} 个模型（${(r.duration_ms / 1000).toFixed(1)} 秒）。点一个就填进 Model，也可以继续手动输入。`);
-    } catch (e) {
-      if (ac.signal.aborted) return;
+    if (!apiKey.trim()) return session.fail("先填 API Key，才能向服务商获取模型列表");
+    if (!baseURL.trim() && pv === "openai-compatible") return session.fail("自填端点必须先给出 Base URL");
+    if (/[{<][A-Za-z_]/.test(baseURL)) return session.fail("Base URL 里还有占位符没替换（把 {…} 换成你自己的值）");
+    const llm = { provider: pv, baseURL: baseURL.trim(), apiKey: apiKey.trim() };
+    await session.start(llm.apiKey, (signal) => backend.llmModels(llm, signal), (e) => {
       const detail = e instanceof ApiError ? e.detail : e instanceof Error ? e.message : String(e);
-      setFetchedModels(null);
       // 旧版后端没有 /llm-models,回的是 404 "not found":别被收口成笼统的"没连接成功"
-      if (e instanceof ApiError && e.code === "not found") fail("本机后端还是旧版本，没有「获取模型」接口。请停掉 scripts/start 后重新启动，再刷新本页。", detail);
-      else fail(friendlyAgentError(e), detail);
-    } finally {
-      if (modelsAbort.current === ac) { modelsAbort.current = null; setFetchingModels(false); }
-    }
+      if (e instanceof ApiError && e.code === "not found") {
+        return { text: "本机后端还是旧版本，没有「获取模型」接口。请停掉 scripts/start 后重新启动，再刷新本页。", detail };
+      }
+      return { text: friendlyAgentError(e), detail };
+    });
   };
 
   const testAndSaveApi = async () => {
@@ -338,6 +322,9 @@ export function Settings() {
 
   const forget = () => {
     // 🔴 清不掉要说出来：吞掉异常的话界面写"已清除"、旧 key 还在，下一次提问照样发出去
+    // 在途的模型列表请求一并作废、列表与提示清空:不然它晚回来,会把用旧 key 取到的列表重新显示出来。
+    // 放在 try 之前:就算清除存储失败,也不该继续显示用这个 key 取到的东西。
+    resetModels();
     try {
       clearLlm();
       setApiKey(""); setConfigured(false); say("已清除。再次使用 AI 功能前需要重新连接。");

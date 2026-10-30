@@ -466,7 +466,7 @@ export const backend = {
    * 失败的 ApiError 带 detail(HTTP 状态 / 上游原文,已抹 key),页面原样展示方便排查。
    */
   llmModels: async (llm: unknown, signal?: AbortSignal) =>
-    call<{ models: { id: string; name: string; contextWindow?: number; maxTokens?: number }[]; url: string; duration_ms: number }>("/llm-models", {
+    call<{ models: { id: string; name: string; contextWindow?: number; maxTokens?: number }[]; hidden?: number; url: string; duration_ms: number }>("/llm-models", {
       method: "POST",
       body: JSON.stringify({ llm }),
       signal,

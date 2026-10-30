@@ -416,10 +416,28 @@ async function readCapped(res: Response, cap: number): Promise<string> {
 }
 
 /**
- * 列出端点提供的模型(OpenAI 兼容 `GET /models`,Bearer 鉴权)。只读,不存任何东西。
- * 失败一律抛 DirectTransportError,错误消息里的上游原文已抹掉 key 并截断。
+ * 成功返回的模型列表也要守住本次 key:网关可能在 id / 名称里回显它,页面会原样显示。
+ * - id 含 key(原样或 JSON 转义形态,以及通用密钥形态)→ **整行丢弃**。不改写 id:
+ *   抹掉后的 id 是另一个字符串,选中它发出去的就是一个服务商不认识、而界面上像是真的模型。
+ * - 名称只给人看 → 脱敏后保留。
+ * @returns 留下的模型,以及因为 id 含密钥而隐藏的行数(页面据此提示,不静默少几行)。
  */
-export async function listModels(req: { baseURL: string; apiKey: string; timeoutMs: number; signal?: AbortSignal; publicOnly?: boolean }): Promise<ListedModel[]> {
+export function guardListedModels(models: readonly ListedModel[], apiKey: string): { models: ListedModel[]; hidden: number } {
+  const kept: ListedModel[] = [];
+  let hidden = 0;
+  for (const m of models) {
+    if (scrubSecrets(m.id, apiKey) !== m.id) { hidden += 1; continue; }
+    kept.push({ ...m, name: scrubSecrets(m.name, apiKey) });
+  }
+  return { models: kept, hidden };
+}
+
+/**
+ * 列出端点提供的模型(OpenAI 兼容 `GET /models`,Bearer 鉴权)。只读,不存任何东西。
+ * 失败一律抛 DirectTransportError,错误消息里的上游原文已抹掉 key 并截断;
+ * 成功的列表经 guardListedModels 过滤 / 脱敏后才返回。
+ */
+export async function listModels(req: { baseURL: string; apiKey: string; timeoutMs: number; signal?: AbortSignal; publicOnly?: boolean }): Promise<{ models: ListedModel[]; hidden: number }> {
   const url = modelListUrl(req.baseURL);
   const timeout = new AbortController();
   const timer = setTimeout(() => timeout.abort(), Math.max(1_000, req.timeoutMs));
@@ -466,5 +484,5 @@ export async function listModels(req: { baseURL: string; apiKey: string; timeout
   catch { throw new DirectTransportError("bad_json", `${url} 返回的不是合法 JSON:${scrubBody(raw, req.apiKey).slice(0, 200)}`, res.status, false); }
   const doc = parsed as { error?: unknown } | null;
   if (doc?.error) throw new DirectTransportError("upstream_error", `模型端点报错:${scrubValue(doc.error, req.apiKey).slice(0, ERROR_BODY_CAP)}`, res.status, false);
-  return parseModelList(parsed);
+  return guardListedModels(parseModelList(parsed), req.apiKey);
 }

@@ -22,7 +22,7 @@ import { researchFailure } from "./research_failure.ts";
 import { runAlerts, InsufficientRunsError, type AlertDiff } from "./alerts.ts";
 import { NOFOLLOW_FLAG, nowIso, readJson, readJsonIfExists } from "./fsutil.ts";
 import { ChatError, REPLY_TRUNCATED, applyGate, chatSend as chatSendCore, llmProbe as llmProbeCore, parseHeadlineTranslationReply, prepareHeadlineTranslation, translateHeadlines as translateHeadlinesCore, type ChatTurnResult, type HeadlineTranslationResult, type LlmProbeResult } from "./chat.ts";
-import { DirectTransportError, apiFailureDetail, chatCompletion, listModels as listModelsCore, modelListUrl, type ListedModel } from "./engines/direct_transport.ts";
+import { DirectTransportError, apiFailureDetail, chatCompletion, listModels as listModelsCore, modelListUrl, scrubSecrets, type ListedModel } from "./engines/direct_transport.ts";
 import { REQUEST_LLM_META_VAR, RUNTIME_KEY_VAR, assertExecutionMode, defaultLlm, requestLlmMeta, resolveDirectProvider, resolveRuntimeProvider, resolveSelectedRuntime, runtimeSourceFingerprint, RuntimeProviderError, templateMatrix, type LlmOverride, type DefaultSourceOptions, type ResolvedApiProvider } from "./runtime_provider.ts";
 import { DebateError, MAX_DEBATE_MESSAGE, DEBATE_TURN_TIMEOUT_MS, advanceDebate, startDebate, type DebateState } from "./debate.ts";
 import { IngestError, MAX_TOTAL_BYTES, ingestFiles as ingestFilesCore, type IngestFileInput, type IngestResult } from "./ingest.ts";
@@ -1926,7 +1926,7 @@ export async function llmProbe(ctx: ServiceContext, req: { llm?: LlmOverride }, 
  * 来源解析与对话同一套(模板、自填端点、远程模式只收公网 https),所以这里不会被拿去连别的地址。
  * 订阅档没有模型列表(模型由 CLI 登录态决定),直接拒。
  */
-export async function llmModels(ctx: ServiceContext, req: { llm?: LlmOverride }, signal?: AbortSignal): Promise<{ models: ListedModel[]; url: string; duration_ms: number }> {
+export async function llmModels(ctx: ServiceContext, req: { llm?: LlmOverride }, signal?: AbortSignal): Promise<{ models: ListedModel[]; hidden: number; url: string; duration_ms: number }> {
   if (!req || typeof req !== "object" || Array.isArray(req)) throw new ServiceError("bad_models_request", "获取模型列表的请求必须是对象");
   const llm = checkLlmShape(req.llm);
   if (!llm) throw new ServiceError("bad_models_request", "获取模型列表要带上页面填的 llm 配置");
@@ -1944,8 +1944,9 @@ export async function llmModels(ctx: ServiceContext, req: { llm?: LlmOverride },
   }
   const t0 = Date.now();
   try {
-    const models = await listModelsCore({ baseURL: api.baseURL, apiKey: api.apiKey, timeoutMs: 20_000, ...(signal ? { signal } : {}) });
-    return { models, url: modelListUrl(api.baseURL), duration_ms: Date.now() - t0 };
+    const { models, hidden } = await listModelsCore({ baseURL: api.baseURL, apiKey: api.apiKey, timeoutMs: 20_000, ...(signal ? { signal } : {}) });
+    // 地址按规则不带查询串和用户名密码,路径里仍可能被填进 key:回给页面前同样抹一次
+    return { models, hidden, url: scrubSecrets(modelListUrl(api.baseURL), api.apiKey), duration_ms: Date.now() - t0 };
   } catch (e) {
     if (e instanceof DirectTransportError) {
       if (e.code === "cancelled") throw new ServiceError("cancelled", "获取模型列表已取消");

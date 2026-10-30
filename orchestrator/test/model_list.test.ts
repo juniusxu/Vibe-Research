@@ -4,7 +4,7 @@ import { test } from "node:test";
 import type { AddressInfo } from "node:net";
 
 import "../src/finance/register.ts";
-import { DirectTransportError, apiFailureDetail, listModels, modelListUrl, parseModelList } from "../src/engines/direct_transport.ts";
+import { DirectTransportError, apiFailureDetail, guardListedModels, listModels, modelListUrl, parseModelList } from "../src/engines/direct_transport.ts";
 import { ChatError, chatSend, llmProbe, resetChatSessions } from "../src/chat.ts";
 
 const KEY = "sk-model-list-secret-123456";
@@ -35,11 +35,41 @@ test("listModels:带 Bearer 请求 /models 并解析", async () => {
   let auth = "", url = "";
   await withServer((req, res) => { auth = String(req.headers.authorization); url = req.url ?? ""; res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ data: [{ id: "m1" }, { id: "m2" }] })); },
     async (base) => {
-      const models = await listModels({ baseURL: `${base}/v1/chat/completions`, apiKey: KEY, timeoutMs: 5000, publicOnly: false });
+      const { models, hidden } = await listModels({ baseURL: `${base}/v1/chat/completions`, apiKey: KEY, timeoutMs: 5000, publicOnly: false });
       assert.deepEqual(models.map((m) => m.id), ["m1", "m2"]);
+      assert.equal(hidden, 0);
       assert.equal(auth, `Bearer ${KEY}`);
       assert.equal(url, "/v1/models");
     });
+});
+
+test("🔴 成功的模型列表也守住 key:id 回显 key 的整行丢弃(不改写成另一个可选模型),名称回显 key 的脱敏后保留", async () => {
+  const escaped = `${KEY}"q`;   // 带引号的 key:网关回显的是 JSON 转义形态
+  const fake = {
+    data: [
+      { id: "good-model", name: "Good" },
+      { id: `invalid_${KEY}`, name: "id 里拼了 key" },                // 原样回显在 id
+      { id: KEY },                                                       // id 就是 key
+      { id: "named-leak", name: `Echo ${KEY} back` },                    // 名称回显
+      { id: "sk-abcdefghijklmnopqrstu", name: "通用密钥形态的 id" },      // 别的密钥形态也不放行
+      { id: "display-leak", display_name: `Bearer ${KEY}` },
+    ],
+  };
+  await withServer((_req, res) => { res.setHeader("content-type", "application/json"); res.end(JSON.stringify(fake)); },
+    async (base) => {
+      const { models, hidden } = await listModels({ baseURL: base, apiKey: KEY, timeoutMs: 5000, publicOnly: false });
+      assert.deepEqual(models.map((m) => m.id), ["good-model", "named-leak", "display-leak"], "含密钥的 id 整行丢弃,不出现被抹过的替身 id");
+      assert.equal(hidden, 3);
+      const all = JSON.stringify(models);
+      assert.ok(!all.includes(KEY), `返回里还有 key:${all}`);
+      assert.ok(!models.some((m) => m.id.includes("***")), "不许把抹掉后的字符串当成可选模型 id");
+      assert.equal(models.find((m) => m.id === "named-leak")?.name, "Echo *** back");
+    });
+  // JSON 转义形态
+  const g = guardListedModels([{ id: `x-${JSON.stringify(escaped).slice(1, -1)}`, name: "n" }, { id: "ok", name: JSON.stringify(escaped) }], escaped);
+  assert.deepEqual(g.models.map((m) => m.id), ["ok"]);
+  assert.equal(g.hidden, 1);
+  assert.ok(!g.models[0]!.name.includes(KEY));
 });
 
 test("listModels 失败:401 / 404 / 非 JSON / 跳转 / 连不上,都带状态码与上游原文,且抹掉 key", async () => {
